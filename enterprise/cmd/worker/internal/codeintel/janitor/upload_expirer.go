@@ -314,14 +314,18 @@ func (e *uploadExpirer) isUploadProtectedByPolicy(
 	return false, nil
 }
 
-func (e *uploadExpirer) areCommitsProtectedByPolicy(ctx context.Context,
+func (e *uploadExpirer) areCommitsProtectedByPolicy(
+	ctx context.Context,
 	fastPathPolicies []dbstore.ConfigurationPolicy,
 	slowPathPolicies []dbstore.ConfigurationPolicy,
 	patterns map[string]glob.Glob,
 	refDescriptions map[string][]gitserver.RefDescription,
 	repositoryCache *repositoryCache,
 	upload dbstore.Upload,
-	commits []string) (bool, error) {
+	commits []string,
+) (bool, error) {
+	// TODO - filter out the commits that aren't protected within this upload time window
+
 	for _, commit := range commits {
 		// See if this commit was already shown to be protected
 		if _, ok := repositoryCache.protectedCommits[commit]; ok {
@@ -332,28 +336,18 @@ func (e *uploadExpirer) areCommitsProtectedByPolicy(ctx context.Context,
 	// Try fast path first to avoid another gitserver query. We check _all_ queries in this batch
 	// first, as if we find one protected commit we can skip checking all of the others on the slow
 	// path as well.
-	if e.isUploadProtectedByPolicyFastPath(
-		fastPathPolicies,
-		patterns,
-		refDescriptions,
-		repositoryCache,
-		upload,
-		commits,
-	) {
+	if e.isUploadProtectedByPolicyFastPath(fastPathPolicies, patterns, refDescriptions, repositoryCache, upload, commits) {
 		return true, nil
 	}
 
 	// Fall back to slow path
-	if ok, err := e.isUploadProtectedByPolicySlowPath(
-		ctx,
-		slowPathPolicies,
-		patterns,
-		repositoryCache,
-		upload,
-		commits,
-	); err != nil || ok {
+	if ok, err := e.isUploadProtectedByPolicySlowPath(ctx, slowPathPolicies, patterns, repositoryCache, upload, commits); err != nil || ok {
 		return ok, err
+
 	}
+
+	// TODO - should mark all commits as unprotected until
+	// the next larger policy timeslice
 
 	return false, nil
 }
@@ -468,7 +462,7 @@ func filterPolicies(policies []dbstore.ConfigurationPolicy, filter func(policy d
 }
 
 // policyCoversUpload returns true if the given policy covers the given upload's age. This function does
-// not do any additional checks between teh policy and upload (e.g., target git reference comparisons).
+// not do any additional checks between the policy and upload (e.g., target git reference comparisons).
 func policyCoversUpload(policy dbstore.ConfigurationPolicy, upload dbstore.Upload) bool {
 	return policy.RetentionDuration == nil || timeutil.Now().Sub(*upload.FinishedAt) <= *policy.RetentionDuration
 }
