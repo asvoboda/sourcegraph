@@ -1,3 +1,4 @@
+import Dialog from '@reach/dialog'
 import { Shortcut } from '@slimsag/react-shortcuts'
 import classNames from 'classnames'
 import { Remote } from 'comlink'
@@ -159,6 +160,7 @@ export class CommandList extends React.PureComponent<CommandListProps, State> {
                     this.setState({ contributions })
                 })
         )
+        // TODO(tj): merge builtin commands with extension commands.
 
         this.subscriptions.add(
             this.props.platformContext.settings.subscribe(settingsCascade => this.setState({ settingsCascade }))
@@ -402,7 +404,7 @@ export const CommandListPopoverButton: React.FunctionComponent<CommandListPopove
             {showCaret && <MenuDropdownIcon />}
 
             {/* Need to use TooltipPopoverWrapper to apply classNames to inner element, see https://github.com/reactstrap/reactstrap/issues/1484 */}
-            <TooltipPopoverWrapper
+            {/* <TooltipPopoverWrapper
                 isOpen={isOpen}
                 toggle={toggleIsOpen}
                 popperClassName={popoverClassName}
@@ -413,9 +415,13 @@ export const CommandListPopoverButton: React.FunctionComponent<CommandListPopove
                 delay={0}
                 fade={false}
                 hideArrow={true}
-            >
-                <CommandList {...props} onSelect={close} />
-            </TooltipPopoverWrapper>
+            > */}
+            {isOpen && (
+                <Dialog onDismiss={() => setIsOpen(false)} className="modal-body rounded border">
+                    <CommandList {...props} onSelect={close} />
+                </Dialog>
+            )}
+            {/* </TooltipPopoverWrapper> */}
             {keyboardShortcutForShow?.keybindings.map((keybinding, index) => (
                 <Shortcut key={index} {...keybinding} onMatch={toggleIsOpen} />
             ))}
