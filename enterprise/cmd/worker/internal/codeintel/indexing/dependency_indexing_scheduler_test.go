@@ -48,6 +48,10 @@ func TestDependencyIndexingSchedulerHandler(t *testing.T) {
 		t.Fatalf("unexpected error performing update: %s", err)
 	}
 
+	if len(mockExtSvcStore.ListFunc.History()) != 0 {
+		t.Errorf("unexpected number of calls to extsvcStore.List. want=%d have=%d", 0, len(mockExtSvcStore.ListFunc.History()))
+	}
+
 	if len(indexEnqueuer.QueueIndexesForPackageFunc.History()) != 6 {
 		t.Errorf("unexpected number of calls to QueueIndexesForPackage. want=%d have=%d", 6, len(indexEnqueuer.QueueIndexesFunc.History()))
 	} else {

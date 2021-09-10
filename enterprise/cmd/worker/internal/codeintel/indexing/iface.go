@@ -22,7 +22,7 @@ type DBStore interface {
 	GetUploadByID(ctx context.Context, id int) (dbstore.Upload, bool, error)
 	ReferencesForUpload(ctx context.Context, uploadID int) (dbstore.PackageReferenceScanner, error)
 	InsertCloneableDependencyRepo(ctx context.Context, dependency precise.Package) (bool, error)
-	InsertDependencyIndexingQueueingJob(ctx context.Context, uploadID int, externalServiceKind string, syncTime *time.Time) (int, error)
+	InsertDependencyIndexingQueueingJob(ctx context.Context, uploadID int, externalServiceKind string, syncTime time.Time) (int, error)
 }
 
 type DBStoreShim struct {

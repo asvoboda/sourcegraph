@@ -73,25 +73,22 @@ func (h *dependencyIndexingSchedulerHandler) Handle(ctx context.Context, record 
 		return nil
 	}
 
-	var errs []error
-
-	externalServices, err := h.extsvcStore.List(ctx, database.ExternalServicesListOptions{
-		Kinds: []string{job.ExternalServiceKind},
-	})
-	if err != nil {
-		if len(errs) == 0 {
+	if job.ExternalServiceKind != "" {
+		externalServices, err := h.extsvcStore.List(ctx, database.ExternalServicesListOptions{
+			Kinds: []string{job.ExternalServiceKind},
+		})
+		if err != nil {
 			return errors.Wrap(err, "dbstore.List")
-		} else {
-			return multierror.Append(err, errs...)
+		}
+
+		for _, externalService := range externalServices {
+			if externalService.LastSyncAt.Before(job.ExternalServiceSync) {
+				return h.workerStore.Requeue(ctx, job.ID, time.Now().Add(time.Second*10))
+			}
 		}
 	}
 
-	for _, externalService := range externalServices {
-		if externalService.LastSyncAt.Before(job.ExternalServiceSync) {
-			return h.workerStore.Requeue(ctx, job.ID, time.Now().Add(time.Second*10))
-		}
-	}
-
+	var errs []error
 	scanner, err := h.dbStore.ReferencesForUpload(ctx, job.UploadID)
 	if err != nil {
 		return errors.Wrap(err, "dbstore.ReferencesForUpload")

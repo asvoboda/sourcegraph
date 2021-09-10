@@ -215,13 +215,14 @@ ON CONFLICT DO NOTHING
 RETURNING 1
 `
 
-func (s *Store) InsertDependencyIndexingQueueingJob(ctx context.Context, uploadID int, externalServiceKind string, syncTime *time.Time) (id int, err error) {
-	ctx, endObservation := s.operations.insertCloneableDependencyQueueingJob.With(ctx, &err, observation.Args{})
+func (s *Store) InsertDependencyIndexingQueueingJob(ctx context.Context, uploadID int, externalServiceKind string, syncTime time.Time) (id int, err error) {
+	ctx, endObservation := s.operations.insertDependencyIndexingQueueingJob.With(ctx, &err, observation.Args{LogFields: []log.Field{
+		log.Int("uploadId", uploadID),
+		log.String("extSvcKind", externalServiceKind),
+	}})
 	defer func() {
 		endObservation(1, observation.Args{LogFields: []log.Field{
 			log.Int("id", id),
-			log.Int("uploadId", uploadID),
-			log.String("extSvcKind", externalServiceKind),
 		}})
 	}()
 

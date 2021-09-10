@@ -108,10 +108,10 @@ func (h *dependencySyncSchedulerHandler) Handle(ctx context.Context, record work
 		}
 	}
 
-	var nextSync *time.Time
+	var nextSync time.Time
 	// If len == 0, it will return all external services, which we definitely don't want.
 	if len(kindsToArray(kinds)) > 0 {
-		nextSync = timePtr(time.Now())
+		nextSync = time.Now()
 		externalServices, err := h.extsvcStore.List(ctx, database.ExternalServicesListOptions{
 			Kinds: kindsToArray(kinds),
 		})
@@ -128,7 +128,7 @@ func (h *dependencySyncSchedulerHandler) Handle(ctx context.Context, record work
 			"newRepos", newDependencyReposInserted, "existingInserts", oldDependencyReposInserted)
 
 		for _, externalService := range externalServices {
-			externalService.NextSyncAt = *nextSync
+			externalService.NextSyncAt = nextSync
 			err := h.extsvcStore.Upsert(ctx, externalService)
 			if err != nil {
 				errs = append(errs, errors.Wrapf(err, "extsvcStore.Upsert: error setting next_sync_at for external service %d - %s", externalService.ID, externalService.DisplayName))
@@ -172,8 +172,6 @@ func (h *dependencySyncSchedulerHandler) insertDependencyRepo(ctx context.Contex
 	}
 	return new, nil
 }
-
-func timePtr(t time.Time) *time.Time { return &t }
 
 func kindsToArray(k map[string]struct{}) (s []string) {
 	for kind := range k {

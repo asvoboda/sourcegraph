@@ -82,7 +82,7 @@ func NewMockDBStore() *MockDBStore {
 			},
 		},
 		InsertDependencyIndexingQueueingJobFunc: &DBStoreInsertDependencyIndexingQueueingJobFunc{
-			defaultHook: func(context.Context, int, string, *time.Time) (int, error) {
+			defaultHook: func(context.Context, int, string, time.Time) (int, error) {
 				return 0, nil
 			},
 		},
@@ -691,8 +691,8 @@ func (c DBStoreInsertCloneableDependencyRepoFuncCall) Results() []interface{} {
 // when the InsertDependencyIndexingQueueingJob method of the parent
 // MockDBStore instance is invoked.
 type DBStoreInsertDependencyIndexingQueueingJobFunc struct {
-	defaultHook func(context.Context, int, string, *time.Time) (int, error)
-	hooks       []func(context.Context, int, string, *time.Time) (int, error)
+	defaultHook func(context.Context, int, string, time.Time) (int, error)
+	hooks       []func(context.Context, int, string, time.Time) (int, error)
 	history     []DBStoreInsertDependencyIndexingQueueingJobFuncCall
 	mutex       sync.Mutex
 }
@@ -700,7 +700,7 @@ type DBStoreInsertDependencyIndexingQueueingJobFunc struct {
 // InsertDependencyIndexingQueueingJob delegates to the next hook function
 // in the queue and stores the parameter and result values of this
 // invocation.
-func (m *MockDBStore) InsertDependencyIndexingQueueingJob(v0 context.Context, v1 int, v2 string, v3 *time.Time) (int, error) {
+func (m *MockDBStore) InsertDependencyIndexingQueueingJob(v0 context.Context, v1 int, v2 string, v3 time.Time) (int, error) {
 	r0, r1 := m.InsertDependencyIndexingQueueingJobFunc.nextHook()(v0, v1, v2, v3)
 	m.InsertDependencyIndexingQueueingJobFunc.appendCall(DBStoreInsertDependencyIndexingQueueingJobFuncCall{v0, v1, v2, v3, r0, r1})
 	return r0, r1
@@ -709,7 +709,7 @@ func (m *MockDBStore) InsertDependencyIndexingQueueingJob(v0 context.Context, v1
 // SetDefaultHook sets function that is called when the
 // InsertDependencyIndexingQueueingJob method of the parent MockDBStore
 // instance is invoked and the hook queue is empty.
-func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) SetDefaultHook(hook func(context.Context, int, string, *time.Time) (int, error)) {
+func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) SetDefaultHook(hook func(context.Context, int, string, time.Time) (int, error)) {
 	f.defaultHook = hook
 }
 
@@ -718,7 +718,7 @@ func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) SetDefaultHook(hook fun
 // instance invokes the hook at the front of the queue and discards it.
 // After the queue is empty, the default hook function is invoked for any
 // future action.
-func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) PushHook(hook func(context.Context, int, string, *time.Time) (int, error)) {
+func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) PushHook(hook func(context.Context, int, string, time.Time) (int, error)) {
 	f.mutex.Lock()
 	f.hooks = append(f.hooks, hook)
 	f.mutex.Unlock()
@@ -727,7 +727,7 @@ func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) PushHook(hook func(cont
 // SetDefaultReturn calls SetDefaultDefaultHook with a function that returns
 // the given values.
 func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) SetDefaultReturn(r0 int, r1 error) {
-	f.SetDefaultHook(func(context.Context, int, string, *time.Time) (int, error) {
+	f.SetDefaultHook(func(context.Context, int, string, time.Time) (int, error) {
 		return r0, r1
 	})
 }
@@ -735,12 +735,12 @@ func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) SetDefaultReturn(r0 int
 // PushReturn calls PushDefaultHook with a function that returns the given
 // values.
 func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) PushReturn(r0 int, r1 error) {
-	f.PushHook(func(context.Context, int, string, *time.Time) (int, error) {
+	f.PushHook(func(context.Context, int, string, time.Time) (int, error) {
 		return r0, r1
 	})
 }
 
-func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) nextHook() func(context.Context, int, string, *time.Time) (int, error) {
+func (f *DBStoreInsertDependencyIndexingQueueingJobFunc) nextHook() func(context.Context, int, string, time.Time) (int, error) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 
@@ -786,7 +786,7 @@ type DBStoreInsertDependencyIndexingQueueingJobFuncCall struct {
 	Arg2 string
 	// Arg3 is the value of the 4th argument passed to this method
 	// invocation.
-	Arg3 *time.Time
+	Arg3 time.Time
 	// Result0 is the value of the 1st result returned from this method
 	// invocation.
 	Result0 int
