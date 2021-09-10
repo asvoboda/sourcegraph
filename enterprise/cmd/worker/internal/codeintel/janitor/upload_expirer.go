@@ -25,6 +25,8 @@ type uploadExpirer struct {
 	repositoryBatchSize    int
 	uploadProcessDelay     time.Duration
 	uploadBatchSize        int
+	commitBatchSize        int
+	cacheMaxKeys           int
 }
 
 var _ goroutine.Handler = &uploadExpirer{}
@@ -42,6 +44,8 @@ func NewUploadExpirer(
 	repositoryBatchSize int,
 	uploadProcessDelay time.Duration,
 	uploadBatchSize int,
+	commitBatchSize int,
+	cacheMaxKeys int,
 	interval time.Duration,
 	metrics *metrics,
 ) goroutine.BackgroundRoutine {
@@ -53,23 +57,21 @@ func NewUploadExpirer(
 		repositoryBatchSize:    repositoryBatchSize,
 		uploadProcessDelay:     uploadProcessDelay,
 		uploadBatchSize:        uploadBatchSize,
+		commitBatchSize:        commitBatchSize,
+		cacheMaxKeys:           cacheMaxKeys,
 	})
 }
 
 func (e *uploadExpirer) Handle(ctx context.Context) (err error) {
-	//
-	// TODO - do not return uploads that are younger than the last commit graph update
-	//
-
 	// Get the batch of repositories that we'll handle in this invocation of the periodic goroutine. This
-	// set should contain a repository that has yet to be updated, or the repository that has been updated
-	// least recently. This allows us to update every repository reliably, even if it takes a long time to
-	// process through the backlog.
-	repositoryIDs, err := e.dbStore.RepositoryIDsForRetentionScan(ctx, e.repositoryProcessDelay, e.repositoryBatchSize)
+	// set should contain repositories that have yet to be updated, or that have been updated least recently.
+	// This allows us to update every repository reliably, even if it takes a long time to process through
+	// the backlog.
+	lastUpdatedAtByRepository, err := e.dbStore.SelectRepositoriesForRetentionScan(ctx, e.repositoryProcessDelay, e.repositoryBatchSize)
 	if err != nil {
 		return err
 	}
-	if len(repositoryIDs) == 0 {
+	if len(lastUpdatedAtByRepository) == 0 {
 		// All repositories updated recently enough
 		return nil
 	}
@@ -83,8 +85,8 @@ func (e *uploadExpirer) Handle(ctx context.Context) (err error) {
 		return err
 	}
 
-	for _, repositoryID := range repositoryIDs {
-		if repositoryErr := e.handleRepository(ctx, repositoryID, globalPolicies); repositoryErr != nil {
+	for repositoryID, repositoryLastUpdatedAt := range lastUpdatedAtByRepository {
+		if repositoryErr := e.handleRepository(ctx, repositoryID, repositoryLastUpdatedAt, globalPolicies); repositoryErr != nil {
 			if err == nil {
 				err = repositoryErr
 			} else {
@@ -93,6 +95,7 @@ func (e *uploadExpirer) Handle(ctx context.Context) (err error) {
 		}
 	}
 
+	// TODO - add metrics for items processed
 	return nil
 }
 
@@ -101,10 +104,7 @@ func (e *uploadExpirer) HandleError(err error) {
 	log15.Error("Failed to expire old codeintel records", "error", err)
 }
 
-func (e *uploadExpirer) handleRepository(ctx context.Context, repositoryID int, globalPolicies []dbstore.ConfigurationPolicy) error {
-	// TODO - add metrics for processed repositories
-	// TODO - add metrics for processed uploads
-
+func (e *uploadExpirer) handleRepository(ctx context.Context, repositoryID int, repositoryLastUpdatedAt *time.Time, globalPolicies []dbstore.ConfigurationPolicy) error {
 	// Retrieve the set of configuration policies that affect data retention. These policies are applied
 	// only to this repository.
 	repositoryPolicies, err := e.dbStore.GetConfigurationPolicies(ctx, dbstore.GetConfigurationPoliciesOptions{
@@ -145,7 +145,10 @@ func (e *uploadExpirer) handleRepository(ctx context.Context, repositoryID int, 
 	// visible from many commits at once, so it is likely that the same commit is re-processed many
 	// times. This cache prevents us from making redundant gitserver requests, and from wasting
 	// compute time iterating through the same data already in memory.
-	repositoryCache := newRepositoryCache()
+	repositoryCache, err := newRepositoryCache(e.cacheMaxKeys)
+	if err != nil {
+		return err
+	}
 
 	// Mark the time after which all unprocessed uploads for this repository will not be touched.
 	// This timestamp field is used as a rate limiting device so we do not busy-loop over the same
@@ -169,6 +172,7 @@ func (e *uploadExpirer) handleRepository(ctx context.Context, repositoryID int, 
 			OldestFirst:             true,
 			Limit:                   e.uploadBatchSize,
 			LastRetentionScanBefore: &lastRetentionScanBefore,
+			UploadedBefore:          repositoryLastUpdatedAt,
 		})
 		if err != nil {
 			return err
@@ -192,16 +196,13 @@ func (e *uploadExpirer) handleUploads(
 	refDescriptions map[string][]gitserver.RefDescription,
 	repositoryCache *repositoryCache,
 	uploads []dbstore.Upload,
-) error {
-
-	var (
-		// Categorize each upload as protected or expired
-		protectedUploadIDs = make([]int, 0, len(uploads))
-		expiredUploadIDs   = make([]int, 0, len(uploads))
-	)
+) (err error) {
+	// Categorize each upload as protected or expired
+	protectedUploadIDs := make([]int, 0, len(uploads))
+	expiredUploadIDs := make([]int, 0, len(uploads))
 
 	for _, upload := range uploads {
-		protected, err := e.isUploadProtectedByPolicy(
+		protected, checkErr := e.isUploadProtectedByPolicy(
 			ctx,
 			policies,
 			patterns,
@@ -209,8 +210,17 @@ func (e *uploadExpirer) handleUploads(
 			repositoryCache,
 			upload,
 		)
-		if err != nil {
-			return err
+		if checkErr != nil {
+			if err == nil {
+				err = checkErr
+			} else {
+				err = multierror.Append(err, checkErr)
+			}
+
+			// Collect errors but not prevent other commits from being successfully
+			// processed. We'll leave the ones that fail here alone to be re-checked
+			// the next time records for this repository are scanned.
+			continue
 		}
 
 		if protected {
@@ -225,11 +235,17 @@ func (e *uploadExpirer) handleUploads(
 	// and sets the expired field on the upload records with the given expired identifiers
 	// (so that the expiredUploadDeleter process can remove then once unreferenced).
 
-	if err := e.dbStore.UpdateUploadRetention(ctx, protectedUploadIDs, expiredUploadIDs); err != nil {
-		return err
+	if updateErr := e.dbStore.UpdateUploadRetention(ctx, protectedUploadIDs, expiredUploadIDs); updateErr != nil {
+		updateErr := errors.Wrap(err, "dbstore.UpdateUploadRetention")
+
+		if err == nil {
+			err = updateErr
+		} else {
+			err = multierror.Append(err, updateErr)
+		}
 	}
 
-	return nil
+	return err
 }
 
 func (e *uploadExpirer) isUploadProtectedByPolicy(
@@ -240,31 +256,45 @@ func (e *uploadExpirer) isUploadProtectedByPolicy(
 	repositoryCache *repositoryCache,
 	upload dbstore.Upload,
 ) (bool, error) {
-	limit := 100 // TODO - configure?
+	// Determine the set of policies that will apply to the fast path. This excludes any policies that
+	// do not cover the time of the upload. Any policy removed here can not protect the given upload.
+	//
+	// Also note that on each invocation of this method for the same repository, this set of policies
+	// can only increase as we process uploads in descending age.
+	fastPathPolicies := filterPolicies(policies, func(policy dbstore.ConfigurationPolicy) bool {
+		return policyCoversUpload(policy, upload)
+	})
+
+	// Determine the set of policies that will apply to the slow path. This excludes any policies that
+	// were not covered in the fast path, as well as any policies that do not cover intermediate commits
+	// of a branch. The fast path, which runs before the slow path, will have already checked whether
+	// these policies protect the upload as the tip of a branch - nwo we need to compare policies against
+	// commits within a branch.
+	slowPathPolicies := filterPolicies(fastPathPolicies, func(policy dbstore.ConfigurationPolicy) bool {
+		return policy.RetainIntermediateCommits
+	})
+
 	var token *string
-
 	for {
-		// TODO - redocument
-		// Get the set of commits for which this upload is visible. This will necessarily include the
-		// exact commit indicted in the upload, but may also provide (best-effort) code intelligence
-		// to nearby commits. We need to consider all visible commits, as we may otherwise delete the
-		// uploads providing code intelligence for the tip of a branch between the time gitserver is
-		// updated and new the associated code intelligence index is processed.
-		commits, nextToken, err := e.dbStore.CommitsVisibleToUpload(ctx, upload.ID, limit, token)
+		// Fetch the set of commits for which this upload can resolve code intelligence queries. This
+		// will necessarily include the exact commit indicated by teh upload, but may also provide
+		// best-effort code intelligence to nearby commits.
+		//
+		// We need to consider all visible commits, as we may otherwise delete the uploads providing
+		// code intelligence for the tip of a branch between the time gitserver is updated and new the
+		// associated code intelligence index is processed.
+		//
+		// We check the set of commits visible to an upload in batches as in some cases it can be very
+		// large; for example, a single historic commit providing code intelligence for all descendants.
+		commits, nextToken, err := e.dbStore.CommitsVisibleToUpload(ctx, upload.ID, e.commitBatchSize, token)
 		if err != nil {
-			return false, err
-		}
-		token = nextToken
-
-		for _, commit := range commits {
-			// See if this commit was already shown to be protected
-			if _, ok := repositoryCache.protectedCommits[commit]; ok {
-				return true, nil
-			}
+			return false, errors.Wrap(err, "dbstore.CommitsVisibleToUpload")
 		}
 
-		if ok, err := e.isUploadProtectedByPolicyFastPath(
-			policies,
+		if ok, err := e.areCommitsProtectedByPolicy(
+			ctx,
+			fastPathPolicies,
+			slowPathPolicies,
 			patterns,
 			refDescriptions,
 			repositoryCache,
@@ -274,52 +304,58 @@ func (e *uploadExpirer) isUploadProtectedByPolicy(
 			return ok, err
 		}
 
-		if ok, err := e.isUploadProtectedByPolicySlowPath(
-			ctx,
-			policies,
-			patterns,
-			repositoryCache,
-			upload,
-			commits,
-		); err != nil || ok {
-			return ok, err
-		}
-
-		if token == nil {
+		if nextToken == nil {
 			break
 		}
+
+		token = nextToken
 	}
 
 	return false, nil
 }
 
-// repositoryCacheBranchesMaxKeys is the bound of the branchesContaining cache used for a single
-// repository. This prevents unbounded memory usage at the expense of duplicate requests to gitserver
-// for large repositories with uploads with many distinct roots.
-const repositoryCacheBranchesMaxKeys = 10000
-
-type repositoryCache struct {
-	// protectedCommits is the set of commits that have been shown to be protected. Because we process
-	// uploads in descending age, once we write a commit to this map, all future uploads we see visible
-	// from this commit will necessarily be younger, and therefore also protected by the same policy.
-	protectedCommits map[string]struct{}
-
-	// branchesContaining is an LRU cache from commits to the set of branches that contains that commit.
-	// Unfortunately we can't easily order our scan over commits, so it is possible to revisit the same
-	// commit at arbitrary intervals, but is unlikely as the order of commits and the order of uploads
-	// (which we follow) should usually be correlated. An LRU cache therefore is likely to benefit from
-	// some degree of locality.
-	branchesContaining *lru.Cache
-}
-
-func newRepositoryCache() *repositoryCache {
-	branchesContaining, _ := lru.New(repositoryCacheBranchesMaxKeys)
-
-	return &repositoryCache{
-		protectedCommits: map[string]struct{}{},
-		// TODO - should have "commits unprotected until "map
-		branchesContaining: branchesContaining,
+func (e *uploadExpirer) areCommitsProtectedByPolicy(ctx context.Context,
+	fastPathPolicies []dbstore.ConfigurationPolicy,
+	slowPathPolicies []dbstore.ConfigurationPolicy,
+	patterns map[string]glob.Glob,
+	refDescriptions map[string][]gitserver.RefDescription,
+	repositoryCache *repositoryCache,
+	upload dbstore.Upload,
+	commits []string) (bool, error) {
+	for _, commit := range commits {
+		// See if this commit was already shown to be protected
+		if _, ok := repositoryCache.protectedCommits[commit]; ok {
+			return true, nil
+		}
 	}
+
+	// Try fast path first to avoid another gitserver query. We check _all_ queries in this batch
+	// first, as if we find one protected commit we can skip checking all of the others on the slow
+	// path as well.
+	if e.isUploadProtectedByPolicyFastPath(
+		fastPathPolicies,
+		patterns,
+		refDescriptions,
+		repositoryCache,
+		upload,
+		commits,
+	) {
+		return true, nil
+	}
+
+	// Fall back to slow path
+	if ok, err := e.isUploadProtectedByPolicySlowPath(
+		ctx,
+		slowPathPolicies,
+		patterns,
+		repositoryCache,
+		upload,
+		commits,
+	); err != nil || ok {
+		return ok, err
+	}
+
+	return false, nil
 }
 
 // isUploadProtectedByPolicyFastPath uses the information we already have about the tips of the repo's
@@ -334,15 +370,9 @@ func (e *uploadExpirer) isUploadProtectedByPolicyFastPath(
 	repositoryCache *repositoryCache,
 	upload dbstore.Upload,
 	commits []string,
-) (bool, error) {
-	// Filter out any policies that do not cover the time of the upload. Any policy removed here can
-	// not protect the given upload. Also note that on each invocation of this method for the same
-	// repository, this set of policies can only increase as we process uploads in descending age.
-	policies = filterPolicies(policies, func(policy dbstore.ConfigurationPolicy) bool {
-		return policyCoversUpload(policy, upload)
-	})
+) bool {
 	if len(policies) == 0 {
-		return false, nil
+		return false
 	}
 
 	for _, commit := range commits {
@@ -350,11 +380,11 @@ func (e *uploadExpirer) isUploadProtectedByPolicyFastPath(
 		// the current commit is the tip.
 		if ok := newTipPolicyMatcher(patterns, commit, refDescriptions[commit])(policies); ok {
 			repositoryCache.protectedCommits[commit] = struct{}{}
-			return true, nil
+			return true
 		}
 	}
 
-	return false, nil
+	return false
 }
 
 // isUploadProtectedByPolicySlowPath completes the protection check by considering policies with retain
@@ -368,12 +398,6 @@ func (e *uploadExpirer) isUploadProtectedByPolicySlowPath(
 	upload dbstore.Upload,
 	commits []string,
 ) (bool, error) {
-	// Filter out any policies that do not cover the time of the upload, or does not cover the intermediate
-	// commits of a branch. Any policy removed here was already shown not to protect the the given upload in
-	// the fast path.
-	policies = filterPolicies(policies, func(policy dbstore.ConfigurationPolicy) bool {
-		return policy.RetainIntermediateCommits && policyCoversUpload(policy, upload)
-	})
 	if len(policies) == 0 {
 		return false, nil
 	}
@@ -402,6 +426,33 @@ func (e *uploadExpirer) isUploadProtectedByPolicySlowPath(
 	}
 
 	return false, nil
+}
+
+type repositoryCache struct {
+	// protectedCommits is the set of commits that have been shown to be protected. Because we process
+	// uploads in descending age, once we write a commit to this map, all future uploads we see visible
+	// from this commit will necessarily be younger, and therefore also protected by the same policy.
+	protectedCommits map[string]struct{}
+
+	// branchesContaining is an LRU cache from commits to the set of branches that contains that commit.
+	// Unfortunately we can't easily order our scan over commits, so it is possible to revisit the same
+	// commit at arbitrary intervals, but is unlikely as the order of commits and the order of uploads
+	// (which we follow) should usually be correlated. An LRU cache therefore is likely to benefit from
+	// some degree of natural locality.
+	branchesContaining *lru.Cache
+}
+
+func newRepositoryCache(maxKeys int) (*repositoryCache, error) {
+	branchesContaining, err := lru.New(maxKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	return &repositoryCache{
+		protectedCommits: map[string]struct{}{},
+		// TODO - should have "commits unprotected until" map
+		branchesContaining: branchesContaining,
+	}, nil
 }
 
 // filterPolicies returns a new slice containing each of the given policies that pass the given filter.

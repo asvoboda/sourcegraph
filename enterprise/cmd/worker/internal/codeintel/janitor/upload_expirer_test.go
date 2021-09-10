@@ -194,6 +194,8 @@ func TestUploadExpirer(t *testing.T) {
 		repositoryBatchSize:    100,
 		uploadProcessDelay:     24 * time.Hour,
 		uploadBatchSize:        100,
+		commitBatchSize:        100,
+		cacheMaxKeys:           10000,
 	}
 
 	if err := uploadExpirer.Handle(context.Background()); err != nil {
@@ -240,7 +242,7 @@ func testUploadExpirerMockStore(
 	}
 
 	dbStore := NewMockDBStore()
-	dbStore.RepositoryIDsForRetentionScanFunc.SetDefaultHook(state.RepositoryIDsForRetentionScan)
+	dbStore.SelectRepositoriesForRetentionScanFunc.SetDefaultHook(state.SelectRepositoriesForRetentionScanFunc)
 	dbStore.GetConfigurationPoliciesFunc.SetDefaultHook(state.GetConfigurationPolicies)
 	dbStore.GetUploadsFunc.SetDefaultHook(state.GetUploads)
 	dbStore.CommitsVisibleToUploadFunc.SetDefaultHook(state.CommitsVisibleToUpload)
@@ -302,14 +304,20 @@ func (s *uploadExpirerMockStore) UpdateUploadRetention(ctx context.Context, prot
 	return nil
 }
 
-func (state *uploadExpirerMockStore) RepositoryIDsForRetentionScan(ctx context.Context, processDelay time.Duration, limit int) (scannedIDs []int, _ error) {
+func (state *uploadExpirerMockStore) SelectRepositoriesForRetentionScanFunc(ctx context.Context, processDelay time.Duration, limit int) (map[int]*time.Time, error) {
+	var scannedIDs []int
 	if len(state.repositoryIDs) <= limit {
 		scannedIDs, state.repositoryIDs = state.repositoryIDs, nil
 	} else {
 		scannedIDs, state.repositoryIDs = state.repositoryIDs[:limit], state.repositoryIDs[limit:]
 	}
 
-	return scannedIDs, nil
+	idsMap := map[int]*time.Time{}
+	for _, id := range scannedIDs {
+		idsMap[id] = nil
+	}
+
+	return idsMap, nil
 }
 
 func (state *uploadExpirerMockStore) GetConfigurationPolicies(ctx context.Context, opts dbstore.GetConfigurationPoliciesOptions) ([]dbstore.ConfigurationPolicy, error) {

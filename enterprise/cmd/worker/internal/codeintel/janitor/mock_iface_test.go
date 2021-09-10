@@ -57,10 +57,10 @@ type MockDBStore struct {
 	// object controlling the behavior of the method
 	// RefreshCommitResolvability.
 	RefreshCommitResolvabilityFunc *DBStoreRefreshCommitResolvabilityFunc
-	// RepositoryIDsForRetentionScanFunc is an instance of a mock function
-	// object controlling the behavior of the method
-	// RepositoryIDsForRetentionScan.
-	RepositoryIDsForRetentionScanFunc *DBStoreRepositoryIDsForRetentionScanFunc
+	// SelectRepositoriesForRetentionScanFunc is an instance of a mock
+	// function object controlling the behavior of the method
+	// SelectRepositoriesForRetentionScan.
+	SelectRepositoriesForRetentionScanFunc *DBStoreSelectRepositoriesForRetentionScanFunc
 	// SoftDeleteOldUploadsFunc is an instance of a mock function object
 	// controlling the behavior of the method SoftDeleteOldUploads.
 	SoftDeleteOldUploadsFunc *DBStoreSoftDeleteOldUploadsFunc
@@ -139,8 +139,8 @@ func NewMockDBStore() *MockDBStore {
 				return 0, 0, nil
 			},
 		},
-		RepositoryIDsForRetentionScanFunc: &DBStoreRepositoryIDsForRetentionScanFunc{
-			defaultHook: func(context.Context, time.Duration, int) ([]int, error) {
+		SelectRepositoriesForRetentionScanFunc: &DBStoreSelectRepositoriesForRetentionScanFunc{
+			defaultHook: func(context.Context, time.Duration, int) (map[int]*time.Time, error) {
 				return nil, nil
 			},
 		},
@@ -207,8 +207,8 @@ func NewMockDBStoreFrom(i DBStore) *MockDBStore {
 		RefreshCommitResolvabilityFunc: &DBStoreRefreshCommitResolvabilityFunc{
 			defaultHook: i.RefreshCommitResolvability,
 		},
-		RepositoryIDsForRetentionScanFunc: &DBStoreRepositoryIDsForRetentionScanFunc{
-			defaultHook: i.RepositoryIDsForRetentionScan,
+		SelectRepositoriesForRetentionScanFunc: &DBStoreSelectRepositoriesForRetentionScanFunc{
+			defaultHook: i.SelectRepositoriesForRetentionScan,
 		},
 		SoftDeleteOldUploadsFunc: &DBStoreSoftDeleteOldUploadsFunc{
 			defaultHook: i.SoftDeleteOldUploads,
@@ -1563,37 +1563,37 @@ func (c DBStoreRefreshCommitResolvabilityFuncCall) Results() []interface{} {
 	return []interface{}{c.Result0, c.Result1, c.Result2}
 }
 
-// DBStoreRepositoryIDsForRetentionScanFunc describes the behavior when the
-// RepositoryIDsForRetentionScan method of the parent MockDBStore instance
-// is invoked.
-type DBStoreRepositoryIDsForRetentionScanFunc struct {
-	defaultHook func(context.Context, time.Duration, int) ([]int, error)
-	hooks       []func(context.Context, time.Duration, int) ([]int, error)
-	history     []DBStoreRepositoryIDsForRetentionScanFuncCall
+// DBStoreSelectRepositoriesForRetentionScanFunc describes the behavior when
+// the SelectRepositoriesForRetentionScan method of the parent MockDBStore
+// instance is invoked.
+type DBStoreSelectRepositoriesForRetentionScanFunc struct {
+	defaultHook func(context.Context, time.Duration, int) (map[int]*time.Time, error)
+	hooks       []func(context.Context, time.Duration, int) (map[int]*time.Time, error)
+	history     []DBStoreSelectRepositoriesForRetentionScanFuncCall
 	mutex       sync.Mutex
 }
 
-// RepositoryIDsForRetentionScan delegates to the next hook function in the
-// queue and stores the parameter and result values of this invocation.
-func (m *MockDBStore) RepositoryIDsForRetentionScan(v0 context.Context, v1 time.Duration, v2 int) ([]int, error) {
-	r0, r1 := m.RepositoryIDsForRetentionScanFunc.nextHook()(v0, v1, v2)
-	m.RepositoryIDsForRetentionScanFunc.appendCall(DBStoreRepositoryIDsForRetentionScanFuncCall{v0, v1, v2, r0, r1})
+// SelectRepositoriesForRetentionScan delegates to the next hook function in
+// the queue and stores the parameter and result values of this invocation.
+func (m *MockDBStore) SelectRepositoriesForRetentionScan(v0 context.Context, v1 time.Duration, v2 int) (map[int]*time.Time, error) {
+	r0, r1 := m.SelectRepositoriesForRetentionScanFunc.nextHook()(v0, v1, v2)
+	m.SelectRepositoriesForRetentionScanFunc.appendCall(DBStoreSelectRepositoriesForRetentionScanFuncCall{v0, v1, v2, r0, r1})
 	return r0, r1
 }
 
 // SetDefaultHook sets function that is called when the
-// RepositoryIDsForRetentionScan method of the parent MockDBStore instance
-// is invoked and the hook queue is empty.
-func (f *DBStoreRepositoryIDsForRetentionScanFunc) SetDefaultHook(hook func(context.Context, time.Duration, int) ([]int, error)) {
+// SelectRepositoriesForRetentionScan method of the parent MockDBStore
+// instance is invoked and the hook queue is empty.
+func (f *DBStoreSelectRepositoriesForRetentionScanFunc) SetDefaultHook(hook func(context.Context, time.Duration, int) (map[int]*time.Time, error)) {
 	f.defaultHook = hook
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// RepositoryIDsForRetentionScan method of the parent MockDBStore instance
-// invokes the hook at the front of the queue and discards it. After the
-// queue is empty, the default hook function is invoked for any future
-// action.
-func (f *DBStoreRepositoryIDsForRetentionScanFunc) PushHook(hook func(context.Context, time.Duration, int) ([]int, error)) {
+// SelectRepositoriesForRetentionScan method of the parent MockDBStore
+// instance invokes the hook at the front of the queue and discards it.
+// After the queue is empty, the default hook function is invoked for any
+// future action.
+func (f *DBStoreSelectRepositoriesForRetentionScanFunc) PushHook(hook func(context.Context, time.Duration, int) (map[int]*time.Time, error)) {
 	f.mutex.Lock()
 	f.hooks = append(f.hooks, hook)
 	f.mutex.Unlock()
@@ -1601,21 +1601,21 @@ func (f *DBStoreRepositoryIDsForRetentionScanFunc) PushHook(hook func(context.Co
 
 // SetDefaultReturn calls SetDefaultDefaultHook with a function that returns
 // the given values.
-func (f *DBStoreRepositoryIDsForRetentionScanFunc) SetDefaultReturn(r0 []int, r1 error) {
-	f.SetDefaultHook(func(context.Context, time.Duration, int) ([]int, error) {
+func (f *DBStoreSelectRepositoriesForRetentionScanFunc) SetDefaultReturn(r0 map[int]*time.Time, r1 error) {
+	f.SetDefaultHook(func(context.Context, time.Duration, int) (map[int]*time.Time, error) {
 		return r0, r1
 	})
 }
 
 // PushReturn calls PushDefaultHook with a function that returns the given
 // values.
-func (f *DBStoreRepositoryIDsForRetentionScanFunc) PushReturn(r0 []int, r1 error) {
-	f.PushHook(func(context.Context, time.Duration, int) ([]int, error) {
+func (f *DBStoreSelectRepositoriesForRetentionScanFunc) PushReturn(r0 map[int]*time.Time, r1 error) {
+	f.PushHook(func(context.Context, time.Duration, int) (map[int]*time.Time, error) {
 		return r0, r1
 	})
 }
 
-func (f *DBStoreRepositoryIDsForRetentionScanFunc) nextHook() func(context.Context, time.Duration, int) ([]int, error) {
+func (f *DBStoreSelectRepositoriesForRetentionScanFunc) nextHook() func(context.Context, time.Duration, int) (map[int]*time.Time, error) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 
@@ -1628,28 +1628,28 @@ func (f *DBStoreRepositoryIDsForRetentionScanFunc) nextHook() func(context.Conte
 	return hook
 }
 
-func (f *DBStoreRepositoryIDsForRetentionScanFunc) appendCall(r0 DBStoreRepositoryIDsForRetentionScanFuncCall) {
+func (f *DBStoreSelectRepositoriesForRetentionScanFunc) appendCall(r0 DBStoreSelectRepositoriesForRetentionScanFuncCall) {
 	f.mutex.Lock()
 	f.history = append(f.history, r0)
 	f.mutex.Unlock()
 }
 
 // History returns a sequence of
-// DBStoreRepositoryIDsForRetentionScanFuncCall objects describing the
+// DBStoreSelectRepositoriesForRetentionScanFuncCall objects describing the
 // invocations of this function.
-func (f *DBStoreRepositoryIDsForRetentionScanFunc) History() []DBStoreRepositoryIDsForRetentionScanFuncCall {
+func (f *DBStoreSelectRepositoriesForRetentionScanFunc) History() []DBStoreSelectRepositoriesForRetentionScanFuncCall {
 	f.mutex.Lock()
-	history := make([]DBStoreRepositoryIDsForRetentionScanFuncCall, len(f.history))
+	history := make([]DBStoreSelectRepositoriesForRetentionScanFuncCall, len(f.history))
 	copy(history, f.history)
 	f.mutex.Unlock()
 
 	return history
 }
 
-// DBStoreRepositoryIDsForRetentionScanFuncCall is an object that describes
-// an invocation of method RepositoryIDsForRetentionScan on an instance of
-// MockDBStore.
-type DBStoreRepositoryIDsForRetentionScanFuncCall struct {
+// DBStoreSelectRepositoriesForRetentionScanFuncCall is an object that
+// describes an invocation of method SelectRepositoriesForRetentionScan on
+// an instance of MockDBStore.
+type DBStoreSelectRepositoriesForRetentionScanFuncCall struct {
 	// Arg0 is the value of the 1st argument passed to this method
 	// invocation.
 	Arg0 context.Context
@@ -1661,7 +1661,7 @@ type DBStoreRepositoryIDsForRetentionScanFuncCall struct {
 	Arg2 int
 	// Result0 is the value of the 1st result returned from this method
 	// invocation.
-	Result0 []int
+	Result0 map[int]*time.Time
 	// Result1 is the value of the 2nd result returned from this method
 	// invocation.
 	Result1 error
@@ -1669,13 +1669,13 @@ type DBStoreRepositoryIDsForRetentionScanFuncCall struct {
 
 // Args returns an interface slice containing the arguments of this
 // invocation.
-func (c DBStoreRepositoryIDsForRetentionScanFuncCall) Args() []interface{} {
+func (c DBStoreSelectRepositoriesForRetentionScanFuncCall) Args() []interface{} {
 	return []interface{}{c.Arg0, c.Arg1, c.Arg2}
 }
 
 // Results returns an interface slice containing the results of this
 // invocation.
-func (c DBStoreRepositoryIDsForRetentionScanFuncCall) Results() []interface{} {
+func (c DBStoreSelectRepositoriesForRetentionScanFuncCall) Results() []interface{} {
 	return []interface{}{c.Result0, c.Result1}
 }
 

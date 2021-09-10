@@ -20,7 +20,7 @@ type DBStore interface {
 	DeleteUploadsWithoutRepository(ctx context.Context, now time.Time) (map[int]int, error)
 	HardDeleteUploadByID(ctx context.Context, ids ...int) error
 	GetConfigurationPolicies(ctx context.Context, opts dbstore.GetConfigurationPoliciesOptions) ([]dbstore.ConfigurationPolicy, error)
-	RepositoryIDsForRetentionScan(ctx context.Context, processDelay time.Duration, limit int) ([]int, error)
+	SelectRepositoriesForRetentionScan(ctx context.Context, processDelay time.Duration, limit int) (map[int]*time.Time, error)
 	CommitsVisibleToUpload(ctx context.Context, uploadID, limit int, token *string) ([]string, *string, error)
 	UpdateUploadRetention(ctx context.Context, protectedIDs, expiredIDs []int) error
 	SoftDeleteOldUploads(ctx context.Context, maxAge time.Duration, now time.Time) (int, error)
